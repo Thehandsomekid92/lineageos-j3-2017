@@ -1,0 +1,77 @@
+# Samsung Exynos7570 ueventd rules
+
+# Devices
+/dev/mali0                0666   system     graphics
+/dev/ion                  0666   system     graphics
+/dev/ump                  0666   system     graphics
+/dev/video0               0660   system     camera
+/dev/video1               0660   system     camera
+/dev/video2               0660   system     camera
+/dev/video3               0660   system     camera
+/dev/media0               0660   system     camera
+/dev/media1               0660   system     camera
+/dev/v4l-subdev0          0660   system     camera
+/dev/v4l-subdev1          0660   system     camera
+/dev/v4l-subdev2          0660   system     camera
+/dev/v4l-subdev3          0660   system     camera
+
+# Radio
+/dev/umts_boot0           0660   radio      radio
+/dev/umts_ipc0            0660   radio      radio
+/dev/umts_rfs0            0660   radio      radio
+/dev/block/mmcblk0p13     0660   radio      system
+
+# Sensors
+/dev/ssp_sensorhub        0660   system     system
+
+# GPS
+/dev/ttySAC1              0660   system     system
+
+# NFC
+/dev/sec-nfc              0660   nfc        nfc
+
+# Fingerprint
+/dev/esfp0                0660   system     system
+
+# Input
+/dev/input/event*         0660   system     input
+
+# Graphics
+/dev/graphics/*           0660   system     graphics
+/dev/fb0                  0660   system     graphics
+
+# Audio
+/dev/snd/*                0660   system     audio
+
+# USB
+/dev/usb_accessory        0660   root       usb
+/dev/tun                  0660   system     vpn
+
+# Block devices
+/dev/block/mmcblk0        0660   root       system
+/dev/block/mmcblk0p*      0660   root       system
+/dev/block/mmcblk1        0660   root       system
+/dev/block/mmcblk1p*      0660   root       system
+
+# RIL
+/sys/devices/virtual/misc/multipdp/waketime           0660  radio  radio
+
+# Power management
+/sys/devices/platform/battery/power_supply/battery/*  0664  system  radio
+/sys/devices/platform/sec-battery/power_supply/battery/*  0664  system  radio
+
+# Backlight
+/sys/class/backlight/panel/brightness                 0664  system  system
+/sys/class/backlight/panel/auto_brightness            0664  system  system
+
+# LEDs
+/sys/class/leds/led_r/brightness                      0660  system  system
+/sys/class/leds/led_g/brightness                      0660  system  system
+/sys/class/leds/led_b/brightness                      0660  system  system
+
+# CPU
+/sys/devices/system/cpu/cpu*                          0660  system  system
+/sys/devices/system/cpu/cpufreq/*                     0664  system  system
+
+# GPU
+/sys/devices/*.mali/*                                 0660  system  system

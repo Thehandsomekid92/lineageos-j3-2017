@@ -1,0 +1,135 @@
+on init
+    # Mount debug FS
+    mount debugfs /sys/kernel/debug /sys/kernel/debug mode=0755
+    
+    # Support legacy paths
+    symlink /sdcard /storage/sdcard0
+    
+    # Setup cpusets
+    mkdir /dev/cpuset/foreground
+    mkdir /dev/cpuset/background
+    mkdir /dev/cpuset/system-background
+    mkdir /dev/cpuset/top-app
+    
+    write /dev/cpuset/foreground/cpus 0-3
+    write /dev/cpuset/background/cpus 0
+    write /dev/cpuset/system-background/cpus 0-1
+    write /dev/cpuset/top-app/cpus 0-3
+    
+    # Create cgroup mount points
+    mkdir /dev/stune
+    mount cgroup none /dev/stune schedtune
+    mkdir /dev/stune/foreground
+    mkdir /dev/stune/background
+    mkdir /dev/stune/top-app
+    
+    # Set permissions for EFS partition
+    mkdir /efs 0771 radio system
+    chown radio system /efs
+    chmod 0771 /efs
+    
+on fs
+    # Mount filesystems
+    mount_all /vendor/etc/fstab.universal7570
+    
+    # Set permissions for firmware
+    chown radio radio /sys/devices/virtual/misc/multipdp/waketime
+    chmod 0660 /sys/devices/virtual/misc/umts_dm0/dm_state
+    chown radio system /sys/devices/virtual/misc/umts_dm0/dm_state
+    
+    # Setup zRAM
+    swapon_all /vendor/etc/fstab.universal7570
+    write /proc/sys/vm/swappiness 100
+    
+on post-fs
+    # Set /system/vendor symlink
+    restorecon /vendor
+    
+on post-fs-data
+    # Create directory for DHCP
+    mkdir /data/vendor/dhcp 0770 dhcp dhcp
+    chown dhcp dhcp /data/vendor/dhcp
+    
+    # Create NFC directories
+    mkdir /data/vendor/nfc 0770 nfc nfc
+    mkdir /data/vendor/nfc/param 0770 nfc nfc
+    
+    # WiFi
+    mkdir /data/vendor/wifi 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa/sockets 0770 wifi wifi
+    
+    # Bluetooth
+    mkdir /efs/bluetooth 0775 radio system
+    mkdir /data/vendor/bluetooth 0770 bluetooth bluetooth
+    
+    # Sensors
+    mkdir /efs/FactoryApp 0775 system system
+    mkdir /efs/FactoryApp/baro_delta 0775 system system
+    
+on boot
+    # CPU Governor
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor interactive
+    
+    # I/O scheduler
+    write /sys/block/mmcblk0/queue/scheduler cfq
+    write /sys/block/mmcblk0/queue/read_ahead_kb 512
+    write /sys/block/mmcblk0/queue/nr_requests 256
+    
+    # GPU
+    write /sys/devices/14ac0000.mali/power_policy coarse_demand
+    write /sys/devices/14ac0000.mali/dvfs_governor interactive
+    
+    # Permissions for Camera
+    chown system system /sys/class/camera/rear/rear_camfw
+    chown system system /sys/class/camera/rear/rear_camtype
+    chown system system /sys/class/camera/flash/rear_flash
+    chown system system /sys/class/camera/front/front_camfw
+    chown system system /sys/class/camera/front/front_camtype
+    
+    # Permissions for Touchscreen
+    chown system radio /sys/class/sec/tsp/cmd
+    chmod 0664 /sys/class/sec/tsp/cmd
+    
+    # Permissions for Backlight
+    chown system system /sys/class/backlight/panel/brightness
+    chmod 0664 /sys/class/backlight/panel/brightness
+    
+    # Permissions for Sensors
+    chown system radio /sys/class/sensors/accelerometer_sensor/calibration
+    chown system radio /sys/class/sensors/gyro_sensor/calibration
+    chown system radio /sys/class/sensors/magnetic_sensor/calibration
+    chown system radio /sys/class/sensors/proximity_sensor/prox_cal
+    
+    # Fingerprint (if available)
+    chown system system /sys/devices/platform/fingerprint/type_check
+    chown system system /sys/devices/platform/fingerprint/vendor
+    
+    # Battery
+    chown radio system /sys/class/power_supply/battery/batt_reset_soc
+    chown radio system /sys/class/power_supply/battery/batt_slate_mode
+    chown radio system /sys/class/power_supply/battery/factory_mode
+    chown radio system /sys/class/power_supply/battery/siop_level
+    chown radio system /sys/class/power_supply/battery/wc_enable
+    chown radio system /sys/class/power_supply/battery/update
+    
+on property:sys.boot_completed=1
+    # ZRAM parameters
+    write /proc/sys/vm/page-cluster 0
+    
+    # CPU freq optimization
+    write /sys/devices/system/cpu/cpufreq/interactive/hispeed_freq 1400000
+    write /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load 85
+    write /sys/devices/system/cpu/cpufreq/interactive/above_hispeed_delay 20000
+    write /sys/devices/system/cpu/cpufreq/interactive/timer_rate 20000
+    write /sys/devices/system/cpu/cpufreq/interactive/min_sample_time 40000
+    
+    # Set default CPU governor to interactive
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor interactive
+
+service vendor.charger /system/bin/charger
+    class charger
+    user system
+    group system graphics input
+    capabilities SYS_BOOT
+    seclabel u:r:charger:s0
