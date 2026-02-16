@@ -1,0 +1,126 @@
+name: Extract Vendor Blobs from Stock ROM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip android-sdk-libsparse-utils unzip
+          pip3 install gdown
+      
+      - name: Download AP file from Google Drive
+        run: |
+          echo "Downloading AP file..."
+          gdown --fuzzy "https://drive.google.com/file/d/1CifdWZ9Q2lvvINv2qxnlZ8wLic-sDq7q/view?usp=sharing"
+          ls -lh
+          
+      - name: Extract AP file
+        run: |
+          echo "Extracting AP tar.md5..."
+          tar -xf AP_J330FNXXS4CUD3*.tar.md5
+          ls -lh *.img 2>/dev/null || ls -lh *.img.lz4 || echo "Looking for images..."
+          
+      - name: Decompress LZ4 images if needed
+        run: |
+          if ls *.img.lz4 1> /dev/null 2>&1; then
+            echo "Decompressing LZ4 images..."
+            sudo apt-get install -y lz4
+            for file in *.img.lz4; do
+              lz4 -d "$file" "${file%.lz4}"
+            done
+          fi
+          ls -lh *.img
+          
+      - name: Convert sparse images to raw
+        run: |
+          echo "Converting sparse images to raw format..."
+          if [ -f system.img ]; then
+            simg2img system.img system_raw.img || cp system.img system_raw.img
+          fi
+          if [ -f vendor.img ]; then
+            simg2img vendor.img vendor_raw.img || cp vendor.img vendor_raw.img
+          fi
+          ls -lh *_raw.img
+          
+      - name: Mount and extract blobs
+        run: |
+          mkdir -p system_mount vendor_mount
+          mkdir -p vendor_blobs/proprietary
+          
+          # Mount system
+          if [ -f system_raw.img ]; then
+            sudo mount -o loop,ro system_raw.img system_mount
+          fi
+          
+          # Mount vendor
+          if [ -f vendor_raw.img ]; then
+            sudo mount -o loop,ro vendor_raw.img vendor_mount
+          fi
+          
+          # Extract vendor blobs
+          echo "Extracting vendor blobs..."
+          
+          # Copy all vendor files
+          if [ -d vendor_mount ]; then
+            sudo cp -r vendor_mount/* vendor_blobs/proprietary/ 2>/dev/null || true
+          fi
+          
+          # Copy system/vendor files if they exist
+          if [ -d system_mount/vendor ]; then
+            sudo cp -r system_mount/vendor/* vendor_blobs/proprietary/ 2>/dev/null || true
+          fi
+          
+          # Set permissions
+          sudo chown -R $(whoami):$(whoami) vendor_blobs/
+          
+          # Unmount
+          sudo umount system_mount 2>/dev/null || true
+          sudo umount vendor_mount 2>/dev/null || true
+          
+      - name: Create vendor makefiles
+        run: |
+          cd vendor_blobs
+          
+          # Create j3y17lte-vendor.mk
+          cat > j3y17lte-vendor.mk << 'EOF'
+          PRODUCT_COPY_FILES += \
+              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/lib,system/lib) \
+              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/lib64,system/lib64) \
+              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/bin,system/bin) \
+              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/etc,system/etc) \
+              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/vendor,system/vendor)
+          EOF
+          
+          # Create BoardConfigVendor.mk
+          cat > BoardConfigVendor.mk << 'EOF'
+          # Vendor blobs from stock ROM
+          EOF
+          
+          echo "Vendor makefiles created!"
+          
+      - name: Package vendor blobs
+        run: |
+          tar -czf vendor_blobs_j3y17lte.tar.gz vendor_blobs/
+          ls -lh vendor_blobs_j3y17lte.tar.gz
+          
+      - name: Upload vendor blobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-blobs-j3y17lte
+          path: vendor_blobs_j3y17lte.tar.gz
+          retention-days: 30
