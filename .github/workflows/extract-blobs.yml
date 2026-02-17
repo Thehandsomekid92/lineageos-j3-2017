@@ -67,7 +67,7 @@ jobs:
               
               # Convert sparse to raw if needed
               if [ -f "$base" ]; then
-                simg2img "$base" "extracted/${base}" 2>&1 || cp "$base" "extracted/${base"
+                simg2img "$base" "extracted/${base}" 2>&1 || cp "$base" "extracted/${base}"
               fi
             fi
           done
