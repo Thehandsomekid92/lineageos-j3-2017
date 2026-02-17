@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 python3-pip android-sdk-libsparse-utils unzip
+          sudo apt-get install -y python3 python3-pip unzip git
           pip3 install gdown
       
       - name: Download AP file from Google Drive
@@ -33,85 +33,127 @@ jobs:
         run: |
           echo "Extracting AP tar.md5..."
           tar -xf AP_J330FNXXS4CUD3*.tar.md5
-          ls -lh *.img 2>/dev/null || ls -lh *.img.lz4 || echo "Looking for images..."
+          ls -lh
           
-      - name: Decompress LZ4 images if needed
+      - name: Install Samsung firmware tools
         run: |
-          if ls *.img.lz4 1> /dev/null 2>&1; then
-            echo "Decompressing LZ4 images..."
-            sudo apt-get install -y lz4
-            for file in *.img.lz4; do
-              lz4 -d "$file" "${file%.lz4}"
-            done
-          fi
-          ls -lh *.img
+          git clone https://github.com/anestisb/android-simg2img.git
+          cd android-simg2img
+          make
+          sudo make install
+          cd ..
           
-      - name: Convert sparse images to raw
+          # Install lz4 for Samsung
+          sudo apt-get install -y liblz4-tool
+          
+      - name: Process images
         run: |
-          echo "Converting sparse images to raw format..."
-          if [ -f system.img ]; then
-            simg2img system.img system_raw.img || cp system.img system_raw.img
-          fi
-          if [ -f vendor.img ]; then
-            simg2img vendor.img vendor_raw.img || cp vendor.img vendor_raw.img
-          fi
-          ls -lh *_raw.img
+          mkdir -p extracted
           
-      - name: Mount and extract blobs
+          # Try to decompress and convert each .lz4 file
+          for file in *.img.lz4; do
+            if [ -f "$file" ]; then
+              echo "Processing $file..."
+              base="${file%.lz4}"
+              
+              # Try lz4 decompression
+              lz4 -d "$file" "$base" 2>&1 || {
+                echo "Standard lz4 failed, trying unlz4..."
+                unlz4 "$file" "$base" 2>&1 || {
+                  echo "Decompression failed for $file, skipping..."
+                  continue
+                }
+              }
+              
+              # Convert sparse to raw if needed
+              if [ -f "$base" ]; then
+                simg2img "$base" "extracted/${base}" 2>&1 || cp "$base" "extracted/${base"
+              fi
+            fi
+          done
+          
+          # Also check for non-lz4 images
+          for file in *.img; do
+            if [ -f "$file" ] && [[ ! "$file" =~ \.lz4 ]]; then
+              echo "Processing $file..."
+              simg2img "$file" "extracted/$file" 2>&1 || cp "$file" "extracted/$file"
+            fi
+          done
+          
+          ls -lh extracted/
+          
+      - name: Mount and extract using Python
         run: |
-          mkdir -p system_mount vendor_mount
-          mkdir -p vendor_blobs/proprietary
+          cat > extract_vendor.py << 'PYTHON_EOF'
+          import os
+          import subprocess
+          import shutil
           
-          # Mount system
-          if [ -f system_raw.img ]; then
-            sudo mount -o loop,ro system_raw.img system_mount
-          fi
+          def run_cmd(cmd):
+              print(f"Running: {cmd}")
+              result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+              print(result.stdout)
+              if result.returncode != 0:
+                  print(f"Error: {result.stderr}")
+              return result.returncode == 0
           
-          # Mount vendor
-          if [ -f vendor_raw.img ]; then
-            sudo mount -o loop,ro vendor_raw.img vendor_mount
-          fi
+          # Create directories
+          os.makedirs("vendor_blobs/proprietary", exist_ok=True)
           
-          # Extract vendor blobs
-          echo "Extracting vendor blobs..."
+          # Try to mount system and vendor
+          images = []
+          for img in os.listdir("extracted"):
+              if img.endswith(".img"):
+                  images.append(f"extracted/{img}")
           
-          # Copy all vendor files
-          if [ -d vendor_mount ]; then
-            sudo cp -r vendor_mount/* vendor_blobs/proprietary/ 2>/dev/null || true
-          fi
+          print(f"Found images: {images}")
           
-          # Copy system/vendor files if they exist
-          if [ -d system_mount/vendor ]; then
-            sudo cp -r system_mount/vendor/* vendor_blobs/proprietary/ 2>/dev/null || true
-          fi
+          for img_path in images:
+              img_name = os.path.basename(img_path).replace(".img", "")
+              mount_point = f"mount_{img_name}"
+              
+              os.makedirs(mount_point, exist_ok=True)
+              
+              # Try to mount
+              if run_cmd(f"sudo mount -o loop,ro {img_path} {mount_point}"):
+                  print(f"Mounted {img_path} successfully")
+                  
+                  # Copy vendor files if this is vendor partition
+                  if "vendor" in img_name.lower():
+                      run_cmd(f"sudo cp -r {mount_point}/* vendor_blobs/proprietary/ 2>/dev/null || true")
+                  
+                  # Copy system/vendor if this is system partition
+                  if "system" in img_name.lower():
+                      vendor_in_system = f"{mount_point}/vendor"
+                      if os.path.exists(vendor_in_system):
+                          run_cmd(f"sudo cp -r {vendor_in_system}/* vendor_blobs/proprietary/ 2>/dev/null || true")
+                  
+                  # Unmount
+                  run_cmd(f"sudo umount {mount_point}")
+              else:
+                  print(f"Failed to mount {img_path}")
           
-          # Set permissions
-          sudo chown -R $(whoami):$(whoami) vendor_blobs/
+          # Fix permissions
+          run_cmd("sudo chown -R $(whoami):$(whoami) vendor_blobs/")
           
-          # Unmount
-          sudo umount system_mount 2>/dev/null || true
-          sudo umount vendor_mount 2>/dev/null || true
+          print("Extraction complete!")
+          print(f"Vendor blobs size: {subprocess.check_output('du -sh vendor_blobs', shell=True).decode()}")
+          PYTHON_EOF
+          
+          python3 extract_vendor.py
           
       - name: Create vendor makefiles
         run: |
           cd vendor_blobs
           
-          # Create j3y17lte-vendor.mk
           cat > j3y17lte-vendor.mk << 'EOF'
           PRODUCT_COPY_FILES += \
-              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/lib,system/lib) \
-              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/lib64,system/lib64) \
-              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/bin,system/bin) \
-              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/etc,system/etc) \
-              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary/vendor,system/vendor)
+              $(call find-copy-subdir-files,*,vendor/samsung/j3y17lte/proprietary,system)
           EOF
           
-          # Create BoardConfigVendor.mk
           cat > BoardConfigVendor.mk << 'EOF'
-          # Vendor blobs from stock ROM
+          # Vendor blobs from stock ROM J330FNXXS4CUD3
           EOF
-          
-          echo "Vendor makefiles created!"
           
       - name: Package vendor blobs
         run: |
